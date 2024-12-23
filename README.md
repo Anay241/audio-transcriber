@@ -4,7 +4,7 @@ A macOS menu bar application that provides quick audio recording and transcripti
 
 ## Features
 
-- Global hotkey (⌘+⇧+S) to start/stop recording from any application
+- Global hotkey (⌥+⇧+S) to start/stop recording from any application
 - Menu bar icon with visual feedback during recording
 - Fast transcription using Faster-Whisper
 - Automatic clipboard copying of transcribed text
@@ -45,7 +45,7 @@ chmod +x launch_transcriber.sh
 2. The application will appear as a microphone icon (🎤) in your menu bar
 
 3. To record:
-   - Use the global hotkey ⌘+⇧+S (Command+Shift+S)
+   - Use the global hotkey ⌥+⇧+S (Option+Shift+S)
    - Or click the menu bar icon and select "Start/Stop Recording"
 
 4. The transcribed text will be automatically copied to your clipboard

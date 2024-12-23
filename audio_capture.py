@@ -182,11 +182,11 @@ class AudioProcessor:
             else:
                 self.keys_pressed.add(key)
             
-            # Check for hotkey combination (Cmd+Shift+S)
-            if (keyboard.Key.cmd in self.keys_pressed and 
+            # Check for hotkey combination (Option+Shift+S)
+            if (keyboard.Key.alt in self.keys_pressed and 
                 keyboard.Key.shift in self.keys_pressed and 
                 's' in self.keys_pressed):
-                logger.debug("Hotkey detected: Command+Shift+S")
+                logger.debug("Hotkey detected: Option+Shift+S")
                 self.toggle_recording()
         except Exception as e:
             logger.error(f"Error in key press handler: {e}")
