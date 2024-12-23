@@ -58,12 +58,12 @@ class AudioTranscriberApp(rumps.App):
         
         # Menu items with separator to ensure clickability
         self.menu = [
-            rumps.MenuItem("Start/Stop Recording (⌘+⇧+S)", callback=self.toggle_recording),
+            rumps.MenuItem("Start/Stop Recording (⌘+⇧+9)", callback=self.toggle_recording),
             None,  # Separator - needed for proper menu structure
         ]
         
         logger.info("Audio Transcriber running in background")
-        logger.info("Use Command+Shift+S from any application to start/stop recording")
+        logger.info("Use Command+Shift+9 from any application to start/stop recording")
 
     def toggle_recording(self, _):
         logger.debug("Menu item clicked: toggle recording")
@@ -182,11 +182,11 @@ class AudioProcessor:
             else:
                 self.keys_pressed.add(key)
             
-            # Check for hotkey combination (Cmd+Shift+S)
+            # Check for hotkey combination (Cmd+Shift+9)
             if (keyboard.Key.cmd in self.keys_pressed and 
                 keyboard.Key.shift in self.keys_pressed and 
-                's' in self.keys_pressed):
-                logger.debug("Hotkey detected: Command+Shift+S")
+                '9' in self.keys_pressed):
+                logger.debug("Hotkey detected: Command+Shift+9")
                 self.toggle_recording()
         except Exception as e:
             logger.error(f"Error in key press handler: {e}")
