@@ -46,3 +46,4 @@ venv/
 # Project specific
 temp_recording.wav
 recording_*.wav 
+models/ 
