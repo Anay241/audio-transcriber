@@ -8,4 +8,4 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Run the audio transcriber
 cd "$DIR"
-/usr/local/bin/python3 audio_capture_2.py > "$DIR/transcriber.log" 2>&1 & 
+/usr/local/bin/python3 audio_capture.py > "$DIR/transcriber.log" 2>&1 & 
