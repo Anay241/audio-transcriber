@@ -7,7 +7,8 @@ from threading import Thread
 import sys
 import logging
 import ssl
-import certifi # type: ignore
+import certifi
+import gc
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -17,12 +18,12 @@ logger = logging.getLogger(__name__)
 ssl_context = ssl.create_default_context(cafile=certifi.where())
 ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-import numpy as np # type: ignore
-import sounddevice as sd # type: ignore
-from faster_whisper import WhisperModel # type: ignore
-import pyperclip # type: ignore
-from pynput import keyboard # type: ignore
-import rumps  # type: ignore # For macOS system tray
+import numpy as np
+import sounddevice as sd
+from faster_whisper import WhisperModel
+import pyperclip
+from pynput import keyboard
+import rumps
 
 class AudioNotifier:
     """Handle system sound notifications."""
@@ -89,17 +90,11 @@ class AudioProcessor:
         self.is_recording: bool = False
         self.frames: List[np.ndarray] = []
         
-        # Initialize Whisper model
-        try:
-            logger.info("Loading Whisper model...")
-            # Initialize Faster Whisper with medium model
-            self.model = WhisperModel("medium", device="cpu", compute_type="int8")
-            logger.info("Whisper model loaded successfully")
-        except Exception as e:
-            logger.error(f"Error loading Whisper model: {e}")
-            self.app.title = "❌"  # Error indicator
-            AudioNotifier.play_sound('error')
-            raise
+        # Model settings
+        self.model = None
+        self.model_timeout = 300  # 5 minutes
+        self.last_use_time = None
+        self.model_cache_dir = os.path.expanduser("~/.cache/huggingface/hub/")
         
         # Setup keyboard listener
         self.keys_pressed: Set = set()
@@ -108,6 +103,50 @@ class AudioProcessor:
             on_release=self.on_release)
         self.listener.start()
         logger.debug("Keyboard listener started")
+
+    def ensure_model_loaded(self) -> WhisperModel:
+        """Ensure model is loaded, loading it if necessary."""
+        if self.model is None:
+            logger.info("Loading Whisper medium model from cache...")
+            try:
+                self.model = WhisperModel(
+                    "medium", 
+                    device="cpu", 
+                    compute_type="int8",
+                    download_root=self.model_cache_dir
+                )
+                self.last_use_time = time.time()
+                logger.info("Model loaded successfully")
+            except Exception as e:
+                logger.error(f"Error loading model: {e}")
+                self.app.title = "❌"  # Error indicator
+                AudioNotifier.play_sound('error')
+                raise
+        return self.model
+
+    def check_model_timeout(self) -> None:
+        """Check if model should be unloaded due to inactivity."""
+        if (self.model is not None and 
+            self.last_use_time is not None and 
+            time.time() - self.last_use_time > self.model_timeout):
+            self.unload_model()
+
+    def unload_model(self) -> None:
+        """Unload model from memory but keep files in cache."""
+        if self.model is not None:
+            logger.info("Unloading model due to inactivity")
+            self.model = None
+            self.last_use_time = None
+            gc.collect()  # Force garbage collection
+
+    def cleanup(self) -> None:
+        """Clean up resources before app exit."""
+        logger.debug("Cleaning up AudioProcessor resources")
+        self.stop_recording()
+        self.unload_model()
+        if self.listener:
+            self.listener.stop()
+            self.listener = None
 
     def callback(self, indata: np.ndarray, frames: int, time_info: dict, status: Optional[str]) -> None:
         """Handle audio recording callback."""
@@ -128,6 +167,46 @@ class AudioProcessor:
             logger.debug(f"Updating menu bar icon to {new_title}")
             self.app.title = new_title
 
+    def process_text(self, text: str) -> str:
+        """
+        Process transcribed text to improve formatting.
+        
+        Args:
+            text: Raw transcribed text
+            
+        Returns:
+            Formatted text with proper capitalization and punctuation
+        """
+        if not text:
+            return text
+            
+        # Split into sentences (Whisper sometimes misses proper sentence breaks)
+        sentences = []
+        current_sentence = []
+        
+        # Split by existing periods but keep them
+        parts = text.replace('. ', '.').split('.')
+        
+        for part in parts:
+            if not part.strip():
+                continue
+                
+            # Clean up the part
+            cleaned = part.strip()
+            
+            # Capitalize first letter
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+            
+            # Add period if it's a complete thought
+            if cleaned and not cleaned.endswith(('!', '?', '.')):
+                cleaned += '.'
+            
+            sentences.append(cleaned)
+        
+        # Join sentences with proper spacing
+        return ' '.join(sentences)
+
     def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
         """
         Transcribe audio using Whisper.
@@ -142,6 +221,10 @@ class AudioProcessor:
             logger.info("Starting transcription")
             self.app.title = "💭"  # Thinking emoji
             
+            # Ensure model is loaded
+            model = self.ensure_model_loaded()
+            self.last_use_time = time.time()
+            
             # Save temporary audio file
             temp_file = "temp_recording.wav"
             with wave.open(temp_file, 'wb') as wf:
@@ -152,12 +235,32 @@ class AudioProcessor:
             
             # Transcribe using Faster Whisper
             try:
-                segments, _ = self.model.transcribe(temp_file, beam_size=5)
-                text = " ".join([segment.text for segment in segments]).strip()
+                segments, _ = model.transcribe(
+                    temp_file,
+                    beam_size=5,
+                    word_timestamps=True,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
                 
-                if text:
-                    logger.info(f"Transcription successful: {text}")
-                    return text
+                # Process segments
+                text_segments = []
+                for segment in segments:
+                    # Clean up the segment text
+                    segment_text = segment.text.strip()
+                    if segment_text:
+                        text_segments.append(segment_text)
+                
+                # Join and process the text
+                if text_segments:
+                    text = ' '.join(text_segments)
+                    processed_text = self.process_text(text)
+                    logger.info(f"Transcription successful: {processed_text}")
+                    
+                    # Check if we should unload the model
+                    self.check_model_timeout()
+                    
+                    return processed_text
                 else:
                     logger.warning("No speech detected in audio")
                     return None
@@ -166,7 +269,7 @@ class AudioProcessor:
                 # Ensure temporary file is always cleaned up
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
-                
+                    
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
             return None
@@ -318,4 +421,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    main() 
