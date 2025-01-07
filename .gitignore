@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -21,21 +20,19 @@ wheels/
 .installed.cfg
 *.egg
 
+# Virtual Environment
+venv/
+ENV/
+env/
+
 # Logs
 *.log
-launcher.error.log
-transcriber.log
+*.log.*
 
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
-._*
-
-# Virtual Environment
-venv/
-.env/
-.venv/
 
 # IDE
 .idea/
@@ -46,4 +43,3 @@ venv/
 # Project specific
 temp_recording.wav
 recording_*.wav 
-models/ 

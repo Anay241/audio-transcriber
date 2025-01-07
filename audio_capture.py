@@ -52,6 +52,7 @@ class AudioTranscriberApp(rumps.App):
         super().__init__(
             "Audio Transcriber",     # App name
             title="🎤",             # Menu bar icon
+            quit_button=None        # Disable default quit button to prevent accidental quits
         )
         
         # Initialize audio processor
@@ -60,11 +61,27 @@ class AudioTranscriberApp(rumps.App):
         # Menu items with separator to ensure clickability
         self.menu = [
             rumps.MenuItem("Start/Stop Recording (⌘+⇧+9)", callback=self.toggle_recording),
-            None,  # Separator - needed for proper menu structure
+            None,  # Separator
+            rumps.MenuItem("Quit", callback=self.quit_app)
         ]
+        
+        # Set up periodic icon refresh
+        rumps.Timer(self.refresh_icon, 60).start()  # Refresh icon every minute
         
         logger.info("Audio Transcriber running in background")
         logger.info("Use Command+Shift+9 from any application to start/stop recording")
+
+    def refresh_icon(self, _):
+        """Periodically refresh the menu bar icon to prevent visual glitches."""
+        if not self.processor.is_recording:
+            current_title = self.title
+            self.title = current_title  # Force a refresh of the icon
+
+    def quit_app(self, _):
+        """Quit the application."""
+        logger.info("Quitting application")
+        self.stop()
+        rumps.quit_application()
 
     def toggle_recording(self, _):
         logger.debug("Menu item clicked: toggle recording")
@@ -138,6 +155,10 @@ class AudioProcessor:
             self.model = None
             self.last_use_time = None
             gc.collect()  # Force garbage collection
+            # Reset and refresh the menu bar icon
+            self.app.title = "🎤"
+            rumps.Timer(lambda _: self.app._nsapp.activateIgnoringOtherApps_(True), 0.1).start()
+            rumps.Timer(lambda _: self.app._nsapp.activateIgnoringOtherApps_(False), 0.2).start()
 
     def cleanup(self) -> None:
         """Clean up resources before app exit."""
