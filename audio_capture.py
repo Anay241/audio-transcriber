@@ -52,6 +52,7 @@ class AudioTranscriberApp(rumps.App):
         super().__init__(
             "Audio Transcriber",     # App name
             title="🎤",             # Menu bar icon
+            quit_button=None        # Disable default quit button to prevent accidental quits
         )
         
         # Initialize audio processor
@@ -60,11 +61,27 @@ class AudioTranscriberApp(rumps.App):
         # Menu items with separator to ensure clickability
         self.menu = [
             rumps.MenuItem("Start/Stop Recording (⌘+⇧+9)", callback=self.toggle_recording),
-            None,  # Separator - needed for proper menu structure
+            None,  # Separator
+            rumps.MenuItem("Quit", callback=self.quit_app)
         ]
+        
+        # Set up periodic icon refresh
+        rumps.Timer(self.refresh_icon, 60).start()  # Refresh icon every minute
         
         logger.info("Audio Transcriber running in background")
         logger.info("Use Command+Shift+9 from any application to start/stop recording")
+
+    def refresh_icon(self, _):
+        """Periodically refresh the menu bar icon to prevent visual glitches."""
+        if not self.processor.is_recording:
+            current_title = self.title
+            self.title = current_title  # Force a refresh of the icon
+
+    def quit_app(self, _):
+        """Quit the application."""
+        logger.info("Quitting application")
+        self.stop()
+        rumps.quit_application()
 
     def toggle_recording(self, _):
         logger.debug("Menu item clicked: toggle recording")
@@ -96,6 +113,9 @@ class AudioProcessor:
         self.last_use_time = None
         self.model_cache_dir = os.path.expanduser("~/.cache/huggingface/hub/")
         
+        # Icon state
+        self._icon_state = "🎤"
+        
         # Setup keyboard listener
         self.keys_pressed: Set = set()
         self.listener = keyboard.Listener(
@@ -103,6 +123,35 @@ class AudioProcessor:
             on_release=self.on_release)
         self.listener.start()
         logger.debug("Keyboard listener started")
+        
+        # Start icon refresh timer
+        rumps.Timer(self.refresh_icon_state, 1).start()  # More frequent refresh
+
+    @property
+    def icon_state(self):
+        """Get current icon state."""
+        return self._icon_state
+
+    @icon_state.setter
+    def icon_state(self, value):
+        """Set icon state and update menu bar."""
+        self._icon_state = value
+        try:
+            self.app.title = value
+        except Exception as e:
+            logger.error(f"Error updating icon: {e}")
+
+    def refresh_icon_state(self, _):
+        """Refresh the icon state periodically."""
+        if not self.is_recording:
+            try:
+                current = self.icon_state
+                # Temporarily set to a different state and back
+                self.icon_state = "🎤 "  # Note the space
+                time.sleep(0.1)
+                self.icon_state = current
+            except Exception as e:
+                logger.error(f"Error in icon refresh: {e}")
 
     def ensure_model_loaded(self) -> WhisperModel:
         """Ensure model is loaded, loading it if necessary."""
@@ -119,7 +168,7 @@ class AudioProcessor:
                 logger.info("Model loaded successfully")
             except Exception as e:
                 logger.error(f"Error loading model: {e}")
-                self.app.title = "❌"  # Error indicator
+                self.icon_state = "❌"  # Error indicator
                 AudioNotifier.play_sound('error')
                 raise
         return self.model
@@ -135,9 +184,20 @@ class AudioProcessor:
         """Unload model from memory but keep files in cache."""
         if self.model is not None:
             logger.info("Unloading model due to inactivity")
+            # Store current icon state
+            current_state = self.icon_state
+            
+            # Clear model
             self.model = None
             self.last_use_time = None
-            gc.collect()  # Force garbage collection
+            
+            # Gentle cleanup
+            gc.collect()
+            
+            # Restore icon state with refresh
+            self.icon_state = "🎤 "  # Temporary different state
+            time.sleep(0.1)
+            self.icon_state = current_state
 
     def cleanup(self) -> None:
         """Clean up resources before app exit."""
@@ -163,9 +223,9 @@ class AudioProcessor:
         # Update icon to show recording level
         volume_norm = np.linalg.norm(indata) * 20
         new_title = "🎙️" if volume_norm > 2 else "🎤"
-        if self.app.title != new_title:
+        if self.icon_state != new_title:
             logger.debug(f"Updating menu bar icon to {new_title}")
-            self.app.title = new_title
+            self.icon_state = new_title
 
     def process_text(self, text: str) -> str:
         """
@@ -219,7 +279,7 @@ class AudioProcessor:
         """
         try:
             logger.info("Starting transcription")
-            self.app.title = "💭"  # Thinking emoji
+            self.icon_state = "💭"  # Thinking emoji
             
             # Ensure model is loaded
             model = self.ensure_model_loaded()
@@ -274,7 +334,7 @@ class AudioProcessor:
             logger.error(f"Error during transcription: {e}")
             return None
         finally:
-            self.app.title = "🎤"  # Reset icon
+            self.icon_state = "🎤"  # Reset icon
 
     def on_press(self, key: keyboard.Key) -> None:
         """Handle keyboard press events."""
@@ -317,7 +377,7 @@ class AudioProcessor:
         """Start audio recording."""
         if not self.is_recording:
             logger.debug("Initializing recording")
-            self.app.title = "⏺️"  # Recording indicator
+            self.icon_state = "⏺️"  # Recording indicator
             self.frames = []
             self.is_recording = True
             
@@ -336,7 +396,7 @@ class AudioProcessor:
             except Exception as e:
                 logger.error(f"Error during recording: {e}")
                 self.is_recording = False
-                self.app.title = "🎤"
+                self.icon_state = "🎤"
                 AudioNotifier.play_sound('error')
 
     def stop_recording(self) -> None:
@@ -359,7 +419,7 @@ class AudioProcessor:
                     if transcript:
                         pyperclip.copy(transcript)
                         logger.info("Transcription copied to clipboard")
-                        self.app.title = "✅"  # Success indicator
+                        self.icon_state = "✅"  # Success indicator
                         AudioNotifier.play_sound('success')  # Play success sound
                         time.sleep(1)  # Show success briefly
                     else:
@@ -375,7 +435,7 @@ class AudioProcessor:
             else:
                 AudioNotifier.play_sound('error')  # Play error sound if audio processing failed
             
-            self.app.title = "🎤"  # Reset icon
+            self.icon_state = "🎤"  # Reset icon
 
     def save_audio(self, filename: str) -> Optional[np.ndarray]:
         """
