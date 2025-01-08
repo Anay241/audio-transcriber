@@ -4,4 +4,5 @@ faster-whisper>=1.1.0
 pyperclip>=1.8.2
 pynput>=1.7.6
 rumps>=0.4.0
-certifi>=2024.2.2 
+certifi>=2024.2.2
+psutil>=5.9.0 

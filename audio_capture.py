@@ -25,6 +25,8 @@ import pyperclip
 from pynput import keyboard
 import rumps
 
+from model_manager import ModelManager  # Import the new ModelManager
+
 class AudioNotifier:
     """Handle system sound notifications."""
     
@@ -107,11 +109,13 @@ class AudioProcessor:
         self.is_recording: bool = False
         self.frames: List[np.ndarray] = []
         
+        # Initialize model manager
+        self.model_manager = ModelManager()
+        
         # Model settings
         self.model = None
         self.model_timeout = 300  # 5 minutes
         self.last_use_time = None
-        self.model_cache_dir = os.path.expanduser("~/.cache/huggingface/hub/")
         
         # Icon state
         self._icon_state = "🎤"
@@ -126,6 +130,14 @@ class AudioProcessor:
         
         # Start icon refresh timer
         rumps.Timer(self.refresh_icon_state, 1).start()  # More frequent refresh
+        
+        # Check if model exists
+        exists, location = self.model_manager.check_model_location(self.model_manager.current_model)
+        if not exists:
+            logger.info("No model found. Please run setup first.")
+            self.icon_state = "❌"
+            AudioNotifier.play_sound('error')
+            raise RuntimeError("No transcription model found. Please run setup first.")
 
     @property
     def icon_state(self):
@@ -156,13 +168,20 @@ class AudioProcessor:
     def ensure_model_loaded(self) -> WhisperModel:
         """Ensure model is loaded, loading it if necessary."""
         if self.model is None:
-            logger.info("Loading Whisper medium model from cache...")
+            # Check if we have a model selected
+            if self.model_manager.current_model is None:
+                logger.error("No model selected. Please run setup first")
+                self.icon_state = "❌"  # Error indicator
+                AudioNotifier.play_sound('error')
+                raise RuntimeError("No transcription model selected. Please run setup first")
+                
+            logger.info(f"Loading Whisper {self.model_manager.current_model} model...")
             try:
                 self.model = WhisperModel(
-                    "medium", 
+                    self.model_manager.current_model, 
                     device="cpu", 
                     compute_type="int8",
-                    download_root=self.model_cache_dir
+                    download_root=str(self.model_manager.get_model_path())
                 )
                 self.last_use_time = time.time()
                 logger.info("Model loaded successfully")

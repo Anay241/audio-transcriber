@@ -6,6 +6,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Activate Python virtual environment
 source "$DIR/venv/bin/activate"
 
-# Run the audio transcriber
+# Run the audio transcriber with setup
 cd "$DIR"
-python audio_capture.py > "$DIR/transcriber.log" 2>&1 & 
+python run_transcriber.py 
