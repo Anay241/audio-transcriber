@@ -6,6 +6,6 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Activate Python virtual environment
 source "$DIR/venv/bin/activate"
 
-# Run the audio transcriber with setup
+# Run the launch manager
 cd "$DIR"
-python run_transcriber.py 
+python launch_manager.py 
