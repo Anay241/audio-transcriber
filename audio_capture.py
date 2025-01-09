@@ -82,6 +82,15 @@ class AudioTranscriberApp(rumps.App):
         """Quit the application."""
         logger.info("Quitting application")
         self.processor.cleanup()  # Clean up resources
+        
+        # Import cleanup function from run_transcriber and clean logs
+        try:
+            from run_transcriber import cleanup_logs
+            cleanup_logs()
+            logger.info("Application shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        
         rumps.quit_application()  # Quit the application
     
     def stop(self):
