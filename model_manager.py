@@ -29,8 +29,8 @@ class ModelManager:
             "optimal_settings": {
                 "cpu_threads": 3,
                 "num_workers": 1,
-                "compute_type": "float16",
-                "memory_threshold": 0.6  # 30% memory threshold
+                "compute_type": "int8",
+                "memory_threshold": 0.6  # 60% memory threshold
             }
         },
         "base": {
@@ -41,8 +41,8 @@ class ModelManager:
             "optimal_settings": {
                 "cpu_threads": 4,
                 "num_workers": 1,
-                "compute_type": "float16",
-                "memory_threshold": 0.6  # 40% memory threshold
+                "compute_type": "int8",
+                "memory_threshold": 0.6  # 60% memory threshold
             }
         },
         "small": {
@@ -53,8 +53,8 @@ class ModelManager:
             "optimal_settings": {
                 "cpu_threads": 4,
                 "num_workers": 1,
-                "compute_type": "float16",
-                "memory_threshold": 0.6  # 50% memory threshold
+                "compute_type": "int8",
+                "memory_threshold": 0.6  # 60% memory threshold
             }
         },
         "medium": {
@@ -65,8 +65,8 @@ class ModelManager:
             "optimal_settings": {
                 "cpu_threads": 6,
                 "num_workers": 1,
-                "compute_type": "float16",
-                "memory_threshold": 0.75  # 60% memory threshold
+                "compute_type": "int8",
+                "memory_threshold": 0.75  # 75% memory threshold
             }
         },
         "large": {
@@ -78,7 +78,7 @@ class ModelManager:
                 "cpu_threads": 4,
                 "num_workers": 1,
                 "compute_type": "int8",
-                "memory_threshold": 0.8  # 70% memory threshold
+                "memory_threshold": 0.8  # 80% memory threshold
             }
         }
     }
@@ -347,7 +347,34 @@ class ModelManager:
             logger.warning(f"Error checking memory status: {e}")
             return False, 0.0
 
-    def get_optimal_settings(self, model_name: str) -> Dict:
+    def test_compute_type_support(self) -> str:
+        """
+        Test which compute types are supported by the system.
+        Returns the most efficient supported compute type.
+        """
+        try:
+            # First try to detect Apple Silicon, which doesn't support float16
+            if self.system_info.get("is_apple_silicon", False):
+                logger.info("Apple Silicon detected, using int8 compute type")
+                return "int8"
+
+            # For other systems, try float16 without loading a model
+            import ctypes
+            try:
+                # Try to create a float16 array using numpy
+                import numpy as np
+                test_array = np.zeros(1, dtype=np.float16)
+                logger.info("float16 compute type is supported")
+                return "float16"
+            except Exception:
+                logger.info("float16 not supported, falling back to int8")
+                return "int8"
+                
+        except Exception as e:
+            logger.warning(f"Unexpected error testing compute type: {e}")
+            return "int8"  # Default to int8 as safest option
+
+    def get_optimal_settings(self, model_name: str = None) -> Dict:
         """
         Get optimal model settings based on model type and system status.
         
@@ -358,6 +385,11 @@ class ModelManager:
             Dict containing optimized settings for model loading
         """
         try:
+            # Use current model if model_name not provided
+            model_name = model_name or self.current_model
+            if not model_name:
+                raise ValueError("No model specified")
+
             # Get model info and optimal settings
             model_info = self.AVAILABLE_MODELS[model_name]
             optimal_settings = model_info["optimal_settings"]
@@ -365,10 +397,13 @@ class ModelManager:
             # Check memory status
             memory_ok, memory_usage = self.check_memory_status()
             
+            # Test supported compute type
+            compute_type = self.test_compute_type_support()
+            
             # Base settings with optimal values
             settings = {
                 "device": "cpu",
-                "compute_type": optimal_settings["compute_type"],
+                "compute_type": compute_type,
                 "cpu_threads": optimal_settings["cpu_threads"],
                 "num_workers": optimal_settings["num_workers"]
             }
@@ -381,7 +416,7 @@ class ModelManager:
                 if settings["cpu_threads"] > 3:
                     settings["cpu_threads"] -= 1
                 
-                # Use int8 for better memory efficiency
+                # Always use int8 for better memory efficiency when memory is tight
                 settings["compute_type"] = "int8"
             
             logger.info(f"Using settings for {model_name}: {settings}")
@@ -482,45 +517,29 @@ class ModelManager:
 
     @performance_monitor("model_loading")
     def get_model(self) -> WhisperModel:
-        """Get a loaded model ready for use. Loads the model if not loaded."""
-        if self.model is None:
-            logger.info("Loading Whisper model from cache...")
-            
-            # Get current model name
-            model_name = self.current_model
-            if not model_name:
-                logger.error("No model selected in configuration")
-                raise ValueError("No model selected in configuration")
-            
-            # Check if model exists
-            exists, model_path = self.check_model_location(model_name)
-            if not exists:
-                logger.error(f"Model {model_name} not found")
-                raise FileNotFoundError(f"Model {model_name} not found")
-            
-            # Get optimized settings
-            settings = self.get_optimal_settings(model_name)
-            
-            # Load the model with optimized settings
-            try:
+        """Get the Whisper model instance, loading it if necessary."""
+        try:
+            if self.model is None:
+                if not self.current_model:
+                    raise ValueError("No model currently selected")
+                    
+                logger.info("Loading Whisper model from cache...")
+                settings = self.get_optimal_settings()
+                logger.info(f"Using settings for {self.current_model}: {settings}")
+                
                 self.model = WhisperModel(
-                    model_name,
-                    device=settings["device"],
-                    compute_type=settings["compute_type"],
-                    cpu_threads=settings["cpu_threads"],
-                    num_workers=settings["num_workers"],
-                    download_root=str(self.cache_dir)
+                    self.current_model,
+                    device="cpu",
+                    compute_type=settings["compute_type"],  # Use dynamically determined compute type
+                    cpu_threads=settings.get("cpu_threads", 4),
+                    num_workers=settings.get("num_workers", 1)
                 )
                 self.last_use_time = time.time()
-                logger.info(f"Model {model_name} loaded successfully with settings: {settings}")
-            except Exception as e:
-                logger.error(f"Error loading model {model_name}: {e}")
-                self.model = None
-                raise
-        
-        # Update last use time
-        self.last_use_time = time.time()
-        return self.model
+            return self.model
+        except Exception as e:
+            logger.error(f"Error loading model {self.current_model}: {str(e)}")
+            logger.error(f"Error during model_loading: {str(e)}")
+            raise
 
     def check_timeout(self) -> None:
         """Check if model should be unloaded due to inactivity."""
