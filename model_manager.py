@@ -2,8 +2,9 @@ import os
 import logging
 import shutil
 import psutil
+import platform
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict
 from faster_whisper import WhisperModel
 import time
 import gc
@@ -24,31 +25,61 @@ class ModelManager:
             "size_mb": 150,
             "speed": "Fastest",
             "accuracy": "Basic",
-            "description": "Best for quick tests and weak hardware"
+            "description": "Best for quick tests and weak hardware",
+            "optimal_settings": {
+                "cpu_threads": 3,
+                "num_workers": 1,
+                "compute_type": "float16",
+                "memory_threshold": 0.6  # 30% memory threshold
+            }
         },
         "base": {
             "size_mb": 400,
             "speed": "Very Fast",
             "accuracy": "Good",
-            "description": "Good balance for basic transcription"
+            "description": "Good balance for basic transcription",
+            "optimal_settings": {
+                "cpu_threads": 4,
+                "num_workers": 1,
+                "compute_type": "float16",
+                "memory_threshold": 0.6  # 40% memory threshold
+            }
         },
         "small": {
             "size_mb": 900,
             "speed": "Fast",
             "accuracy": "Better",
-            "description": "Recommended for most users"
+            "description": "Recommended for most users",
+            "optimal_settings": {
+                "cpu_threads": 4,
+                "num_workers": 1,
+                "compute_type": "float16",
+                "memory_threshold": 0.6  # 50% memory threshold
+            }
         },
         "medium": {
             "size_mb": 3000,
             "speed": "Moderate",
             "accuracy": "Very Good",
-            "description": "Best quality for common hardware"
+            "description": "Best quality for common hardware",
+            "optimal_settings": {
+                "cpu_threads": 6,
+                "num_workers": 1,
+                "compute_type": "float16",
+                "memory_threshold": 0.75  # 60% memory threshold
+            }
         },
         "large": {
             "size_mb": 6000,
             "speed": "Slow",
             "accuracy": "Best",
-            "description": "Highest quality, requires powerful hardware"
+            "description": "Highest quality, requires powerful hardware",
+            "optimal_settings": {
+                "cpu_threads": 4,
+                "num_workers": 1,
+                "compute_type": "int8",
+                "memory_threshold": 0.8  # 70% memory threshold
+            }
         }
     }
     
@@ -61,6 +92,17 @@ class ModelManager:
         
         # Cache directory for models
         self.cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        
+        # System capabilities
+        self.system_info = self.get_system_info()
+        logger.info(f"System capabilities detected: {self.system_info}")
+        
+        # Performance monitoring
+        self.performance_stats = {
+            "load_times": [],
+            "memory_usage": [],
+            "cpu_usage": []
+        }
         
         # Model state management
         self.model = None
@@ -285,6 +327,160 @@ class ModelManager:
         logger.debug(f"No model.bin found in snapshots: {snapshots_dir}")
         return False, None
     
+    def check_memory_status(self) -> tuple[bool, float]:
+        """
+        Check current memory status.
+        
+        Returns:
+            Tuple of (is_memory_ok: bool, memory_usage: float)
+            - is_memory_ok: True if memory usage is within safe limits
+            - memory_usage: Current memory usage as a percentage
+        """
+        try:
+            memory = psutil.virtual_memory()
+            memory_usage = memory.percent / 100.0  # Convert to decimal
+            
+            logger.debug(f"Current memory usage: {memory_usage:.1%}")
+            return True, memory_usage
+            
+        except Exception as e:
+            logger.warning(f"Error checking memory status: {e}")
+            return False, 0.0
+
+    def get_optimal_settings(self, model_name: str) -> Dict:
+        """
+        Get optimal model settings based on model type and system status.
+        
+        Args:
+            model_name: Name of the model to get settings for
+            
+        Returns:
+            Dict containing optimized settings for model loading
+        """
+        try:
+            # Get model info and optimal settings
+            model_info = self.AVAILABLE_MODELS[model_name]
+            optimal_settings = model_info["optimal_settings"]
+            
+            # Check memory status
+            memory_ok, memory_usage = self.check_memory_status()
+            
+            # Base settings with optimal values
+            settings = {
+                "device": "cpu",
+                "compute_type": optimal_settings["compute_type"],
+                "cpu_threads": optimal_settings["cpu_threads"],
+                "num_workers": optimal_settings["num_workers"]
+            }
+            
+            # If memory usage is high, adjust settings
+            if memory_ok and memory_usage > optimal_settings["memory_threshold"]:
+                logger.info(f"High memory usage ({memory_usage:.1%}), adjusting settings")
+                
+                # Reduce threads if memory is tight
+                if settings["cpu_threads"] > 3:
+                    settings["cpu_threads"] -= 1
+                
+                # Use int8 for better memory efficiency
+                settings["compute_type"] = "int8"
+            
+            logger.info(f"Using settings for {model_name}: {settings}")
+            return settings
+            
+        except Exception as e:
+            logger.warning(f"Error determining optimal settings: {e}")
+            # Return conservative defaults
+            return {
+                "device": "cpu",
+                "compute_type": "int8",
+                "cpu_threads": 1,
+                "num_workers": 1
+            }
+
+    def monitor_performance(self, operation: str):
+        """
+        Decorator to monitor performance of model operations.
+        
+        Args:
+            operation: Name of the operation being monitored
+        """
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                start_time = time.time()
+                start_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                start_cpu = psutil.cpu_percent()
+                
+                try:
+                    result = func(*args, **kwargs)
+                    
+                    # Calculate metrics
+                    end_time = time.time()
+                    end_memory = psutil.Process().memory_info().rss / 1024 / 1024
+                    end_cpu = psutil.cpu_percent()
+                    
+                    # Store performance data
+                    self.performance_stats["load_times"].append(end_time - start_time)
+                    self.performance_stats["memory_usage"].append(end_memory - start_memory)
+                    self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
+                    
+                    # Log performance data
+                    logger.info(f"Performance stats for {operation}:")
+                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"Error during {operation}: {e}")
+                    raise
+                    
+            return wrapper
+        return decorator
+
+    @staticmethod
+    def performance_monitor(operation: str):
+        """
+        Static decorator for monitoring performance.
+        
+        Args:
+            operation: Name of the operation being monitored
+        """
+        def decorator(func):
+            def wrapper(self, *args, **kwargs):
+                start_time = time.time()
+                start_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+                start_cpu = psutil.cpu_percent()
+                
+                try:
+                    result = func(self, *args, **kwargs)
+                    
+                    # Calculate metrics
+                    end_time = time.time()
+                    end_memory = psutil.Process().memory_info().rss / 1024 / 1024
+                    end_cpu = psutil.cpu_percent()
+                    
+                    # Store performance data
+                    self.performance_stats["load_times"].append(end_time - start_time)
+                    self.performance_stats["memory_usage"].append(end_memory - start_memory)
+                    self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
+                    
+                    # Log performance data
+                    logger.info(f"Performance stats for {operation}:")
+                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"Error during {operation}: {e}")
+                    raise
+                    
+            return wrapper
+        return decorator
+
+    @performance_monitor("model_loading")
     def get_model(self) -> WhisperModel:
         """Get a loaded model ready for use. Loads the model if not loaded."""
         if self.model is None:
@@ -302,16 +498,21 @@ class ModelManager:
                 logger.error(f"Model {model_name} not found")
                 raise FileNotFoundError(f"Model {model_name} not found")
             
-            # Load the model
+            # Get optimized settings
+            settings = self.get_optimal_settings(model_name)
+            
+            # Load the model with optimized settings
             try:
                 self.model = WhisperModel(
                     model_name,
-                    device="cpu",
-                    compute_type="int8",
+                    device=settings["device"],
+                    compute_type=settings["compute_type"],
+                    cpu_threads=settings["cpu_threads"],
+                    num_workers=settings["num_workers"],
                     download_root=str(self.cache_dir)
                 )
                 self.last_use_time = time.time()
-                logger.info(f"Model {model_name} loaded successfully")
+                logger.info(f"Model {model_name} loaded successfully with settings: {settings}")
             except Exception as e:
                 logger.error(f"Error loading model {model_name}: {e}")
                 self.model = None
@@ -337,3 +538,144 @@ class ModelManager:
             self.last_use_time = None
             gc.collect()
             logger.debug("Model unloaded successfully") 
+
+    def get_system_info(self) -> Dict:
+        """
+        Get system capabilities for optimization.
+        
+        Returns:
+            Dict containing system information:
+            - cpu_cores: Number of physical CPU cores
+            - memory_gb: Total system memory in GB
+            - processor: Processor type
+            - is_apple_silicon: Whether running on Apple Silicon
+        """
+        try:
+            cpu_count = psutil.cpu_count(logical=False)  # Physical CPU cores
+            total_memory = psutil.virtual_memory().total / (1024 * 1024 * 1024)  # GB
+            processor = platform.processor()
+            is_apple_silicon = 'arm' in processor.lower()
+            
+            system_info = {
+                "cpu_cores": cpu_count or 2,  # Fallback to 2 if detection fails
+                "memory_gb": round(total_memory, 1),
+                "processor": processor,
+                "is_apple_silicon": is_apple_silicon
+            }
+            
+            logger.debug(f"Detected system capabilities: {system_info}")
+            return system_info
+            
+        except Exception as e:
+            logger.warning(f"Error getting system info: {e}")
+            # Return conservative defaults if detection fails
+            return {
+                "cpu_cores": 2,
+                "memory_gb": 8,
+                "processor": "unknown",
+                "is_apple_silicon": False
+            } 
+
+    def get_performance_summary(self) -> Dict:
+        """
+        Get a summary of performance statistics.
+        
+        Returns:
+            Dict containing average load times, memory usage, and CPU usage
+        """
+        if not self.performance_stats["load_times"]:
+            return {
+                "avg_load_time": 0,
+                "avg_memory_usage": 0,
+                "avg_cpu_usage": 0
+            }
+            
+        return {
+            "avg_load_time": sum(self.performance_stats["load_times"]) / len(self.performance_stats["load_times"]),
+            "avg_memory_usage": sum(self.performance_stats["memory_usage"]) / len(self.performance_stats["memory_usage"]),
+            "avg_cpu_usage": sum(self.performance_stats["cpu_usage"]) / len(self.performance_stats["cpu_usage"])
+        } 
+
+    def get_audio_settings(self, audio_duration: float) -> Dict:
+        """
+        Determine optimal settings based on audio length.
+        
+        Args:
+            audio_duration: Length of audio in seconds
+            
+        Returns:
+            Dict containing audio-specific settings
+        """
+        try:
+            if not self.current_model:
+                raise ValueError("No model selected")
+                
+            # Get base settings
+            settings = self.get_optimal_settings(self.current_model)
+            
+            # Adjust settings based on audio length
+            if audio_duration > 60:  # Long audio (>1 minute)
+                logger.info("Long audio detected, optimizing for memory efficiency")
+                settings["compute_type"] = "int8"  # Use int8 for longer audio
+                if settings["cpu_threads"] > 4:
+                    settings["cpu_threads"] = 4  # Reduce threads for longer audio
+                    
+            elif audio_duration < 10:  # Short audio (<10 seconds)
+                logger.info("Short audio detected, optimizing for speed")
+                if self.system_info["memory_gb"] >= 8:  # If enough memory
+                    settings["compute_type"] = "float16"  # Use float16 for better accuracy
+                    
+            logger.info(f"Audio-optimized settings: {settings}")
+            return settings
+            
+        except Exception as e:
+            logger.error(f"Error getting audio settings: {e}")
+            return self.get_optimal_settings(self.current_model)
+
+    def prepare_model_for_audio(self, audio_duration: float = 0) -> None:
+        """
+        Prepare model with optimal settings for audio length.
+        
+        Args:
+            audio_duration: Length of audio in seconds
+        """
+        try:
+            if self.model is None:
+                logger.info("Loading model for first time")
+                self.get_model()  # Initial load with default settings
+                return
+                
+            # Get current memory usage
+            _, memory_usage = self.check_memory_status()
+            
+            # Check if we need to reload with different settings
+            current_settings = self.get_optimal_settings(self.current_model)
+            audio_settings = self.get_audio_settings(audio_duration)
+            
+            # Decide if reload is needed
+            needs_reload = (
+                current_settings["compute_type"] != audio_settings["compute_type"] or
+                current_settings["cpu_threads"] != audio_settings["cpu_threads"] or
+                memory_usage > 0.85  # 85% memory usage threshold
+            )
+            
+            if needs_reload:
+                logger.info("Reloading model with audio-optimized settings")
+                self.unload_model()
+                
+                # Load with audio-optimized settings
+                self.model = WhisperModel(
+                    self.current_model,
+                    device="cpu",
+                    compute_type=audio_settings["compute_type"],
+                    cpu_threads=audio_settings["cpu_threads"],
+                    num_workers=audio_settings["num_workers"],
+                    download_root=str(self.cache_dir)
+                )
+                logger.info("Model reloaded with optimized settings")
+                
+        except Exception as e:
+            logger.error(f"Error preparing model: {e}")
+            # Fallback to regular model loading if preparation fails
+            if self.model is None:
+                self.get_model() 
