@@ -593,7 +593,7 @@ class ModelManager:
                 "memory_gb": 8,
                 "processor": "unknown",
                 "is_apple_silicon": False
-            } 
+            }
 
     def get_performance_summary(self) -> Dict:
         """
