@@ -81,18 +81,18 @@ class AudioTranscriberApp(rumps.App):
     def quit_app(self, _):
         """Quit the application."""
         logger.info("Quitting application")
-        self.stop()
-        rumps.quit_application()
-
-    def toggle_recording(self, _):
-        logger.debug("Menu item clicked: toggle recording")
-        self.processor.toggle_recording()
+        self.processor.cleanup()  # Clean up resources
+        rumps.quit_application()  # Quit the application
     
     def stop(self):
         """Called by rumps when quitting the application."""
         logger.debug("Stopping application")
         self.processor.cleanup()
-        super().stop()  # Call parent's stop method
+
+    def toggle_recording(self, _):
+        """Toggle recording state via menu bar."""
+        logger.debug("Menu item clicked: toggle recording")
+        self.processor.toggle_recording()
 
 class AudioProcessor:
     """Handle audio recording and processing."""
