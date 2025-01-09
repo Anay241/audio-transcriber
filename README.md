@@ -80,6 +80,31 @@ A macOS menu bar application that provides real-time audio transcription using W
    - Glass sound: Transcription successful
    - Basso sound: Error occurred
 
+## Changing Models
+
+To switch to a different model:
+```bash
+./launch_transcriber.sh --change-model
+```
+
+This will:
+1. Show your current model and its characteristics
+2. Let you choose a new model
+3. Handle the download and switch automatically
+
+## Model Storage and Management
+
+Models are stored in the Hugging Face cache directory:
+```
+~/.cache/huggingface/hub/
+```
+
+For advanced users:
+- Models are shared between applications using Whisper
+- Each model is stored in: `models--guillaumekln--faster-whisper-{model_name}`
+- You can manually delete models from this directory if needed
+- The app will automatically download models again if needed
+
 ## Troubleshooting
 
 1. **No menu bar icon?**
