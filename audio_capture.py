@@ -24,6 +24,7 @@ from faster_whisper import WhisperModel
 import pyperclip
 from pynput import keyboard
 import rumps
+from model_manager import ModelManager
 
 class AudioNotifier:
     """Handle system sound notifications."""
@@ -80,21 +81,23 @@ class AudioTranscriberApp(rumps.App):
     def quit_app(self, _):
         """Quit the application."""
         logger.info("Quitting application")
-        self.stop()
-        rumps.quit_application()
-
-    def toggle_recording(self, _):
-        logger.debug("Menu item clicked: toggle recording")
-        self.processor.toggle_recording()
+        self.processor.cleanup()  # Clean up resources
+        rumps.quit_application()  # Quit the application
     
     def stop(self):
         """Called by rumps when quitting the application."""
         logger.debug("Stopping application")
         self.processor.cleanup()
-        super().stop()  # Call parent's stop method
+
+    def toggle_recording(self, _):
+        """Toggle recording state via menu bar."""
+        logger.debug("Menu item clicked: toggle recording")
+        self.processor.toggle_recording()
 
 class AudioProcessor:
-    def __init__(self, app) -> None:
+    """Handle audio recording and processing."""
+    
+    def __init__(self, app):
         """Initialize the audio processing system."""
         logger.debug("Initializing AudioProcessor")
         self.app = app
@@ -105,13 +108,11 @@ class AudioProcessor:
         self.dtype = np.int16
         self.blocksize: int = 8192
         self.is_recording: bool = False
+        self.ready_to_record: bool = True
         self.frames: List[np.ndarray] = []
         
-        # Model settings
-        self.model = None
-        self.model_timeout = 300  # 5 minutes
-        self.last_use_time = None
-        self.model_cache_dir = os.path.expanduser("~/.cache/huggingface/hub/")
+        # Model management
+        self.model_manager = ModelManager()
         
         # Icon state
         self._icon_state = "🎤"
@@ -125,7 +126,7 @@ class AudioProcessor:
         logger.debug("Keyboard listener started")
         
         # Start icon refresh timer
-        rumps.Timer(self.refresh_icon_state, 1).start()  # More frequent refresh
+        rumps.Timer(self.refresh_icon_state, 1).start()
 
     @property
     def icon_state(self):
@@ -154,78 +155,82 @@ class AudioProcessor:
                 logger.error(f"Error in icon refresh: {e}")
 
     def ensure_model_loaded(self) -> WhisperModel:
-        """Ensure model is loaded, loading it if necessary."""
-        if self.model is None:
-            logger.info("Loading Whisper medium model from cache...")
+        """Get a loaded model for transcription."""
+        try:
+            return self.model_manager.get_model()
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            self.icon_state = "❌"
+            AudioNotifier.play_sound('error')
+            raise
+
+    def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
+        """
+        Transcribe audio using Whisper.
+        
+        Args:
+            audio_data: The audio data to transcribe
+            
+        Returns:
+            Transcription text or None if transcription failed
+        """
+        try:
+            logger.info("Starting transcription")
+            self.icon_state = "💭"  # Thinking emoji
+            
+            # Get model for transcription
+            model = self.ensure_model_loaded()
+            
+            # Save temporary audio file
+            temp_file = "temp_recording.wav"
+            with wave.open(temp_file, 'wb') as wf:
+                wf.setnchannels(self.channels)
+                wf.setsampwidth(2)
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(audio_data.tobytes())
+            
+            # Transcribe using Faster Whisper
             try:
-                self.model = WhisperModel(
-                    "medium", 
-                    device="cpu", 
-                    compute_type="int8",
-                    download_root=self.model_cache_dir
+                segments, _ = model.transcribe(
+                    temp_file,
+                    beam_size=5,
+                    word_timestamps=True,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
                 )
-                self.last_use_time = time.time()
-                logger.info("Model loaded successfully")
-            except Exception as e:
-                logger.error(f"Error loading model: {e}")
-                self.icon_state = "❌"  # Error indicator
-                AudioNotifier.play_sound('error')
-                raise
-        return self.model
-
-    def check_model_timeout(self) -> None:
-        """Check if model should be unloaded due to inactivity."""
-        if (self.model is not None and 
-            self.last_use_time is not None and 
-            time.time() - self.last_use_time > self.model_timeout):
-            self.unload_model()
-
-    def unload_model(self) -> None:
-        """Unload model from memory but keep files in cache."""
-        if self.model is not None:
-            logger.info("Unloading model due to inactivity")
-            # Store current icon state
-            current_state = self.icon_state
-            
-            # Clear model
-            self.model = None
-            self.last_use_time = None
-            
-            # Gentle cleanup
-            gc.collect()
-            
-            # Restore icon state with refresh
-            self.icon_state = "🎤 "  # Temporary different state
-            time.sleep(0.1)
-            self.icon_state = current_state
-
-    def cleanup(self) -> None:
-        """Clean up resources before app exit."""
-        logger.debug("Cleaning up AudioProcessor resources")
-        self.stop_recording()
-        self.unload_model()
-        if self.listener:
-            self.listener.stop()
-            self.listener = None
-
-    def callback(self, indata: np.ndarray, frames: int, time_info: dict, status: Optional[str]) -> None:
-        """Handle audio recording callback."""
-        if status:
-            logger.warning(f'Audio status: {status}')
-        
-        # Process audio data
-        audio_data = (indata * 32767).astype(np.int16)
-        noise_threshold = 100
-        audio_data[np.abs(audio_data) < noise_threshold] = 0
-        
-        self.frames.append(audio_data)
-        
-        # Update icon to show recording level
-        volume_norm = np.linalg.norm(indata) * 20
-        new_title = "🎙️" if volume_norm > 2 else "🎤"
-        if self.icon_state != new_title:
-            logger.debug(f"Updating menu bar icon to {new_title}")
-            self.icon_state = new_title
+                
+                # Process segments
+                text_segments = []
+                for segment in segments:
+                    # Clean up the segment text
+                    segment_text = segment.text.strip()
+                    if segment_text:
+                        text_segments.append(segment_text)
+                
+                # Join and process the text
+                if text_segments:
+                    text = ' '.join(text_segments)
+                    processed_text = self.process_text(text)
+                    logger.info(f"Transcription successful: {processed_text}")
+                    
+                    # Check if we should unload the model
+                    self.model_manager.check_timeout()
+                    
+                    return processed_text
+                else:
+                    logger.warning("No speech detected in audio")
+                    return None
+                    
+            finally:
+                # Ensure temporary file is always cleaned up
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}")
+            return None
+        finally:
+            self.icon_state = "🎤"  # Reset icon
 
     def process_text(self, text: str) -> str:
         """
@@ -267,75 +272,6 @@ class AudioProcessor:
         # Join sentences with proper spacing
         return ' '.join(sentences)
 
-    def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
-        """
-        Transcribe audio using Whisper.
-        
-        Args:
-            audio_data: The audio data to transcribe
-            
-        Returns:
-            Transcription text or None if transcription failed
-        """
-        try:
-            logger.info("Starting transcription")
-            self.icon_state = "💭"  # Thinking emoji
-            
-            # Ensure model is loaded
-            model = self.ensure_model_loaded()
-            self.last_use_time = time.time()
-            
-            # Save temporary audio file
-            temp_file = "temp_recording.wav"
-            with wave.open(temp_file, 'wb') as wf:
-                wf.setnchannels(self.channels)
-                wf.setsampwidth(2)
-                wf.setframerate(self.sample_rate)
-                wf.writeframes(audio_data.tobytes())
-            
-            # Transcribe using Faster Whisper
-            try:
-                segments, _ = model.transcribe(
-                    temp_file,
-                    beam_size=5,
-                    word_timestamps=True,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                
-                # Process segments
-                text_segments = []
-                for segment in segments:
-                    # Clean up the segment text
-                    segment_text = segment.text.strip()
-                    if segment_text:
-                        text_segments.append(segment_text)
-                
-                # Join and process the text
-                if text_segments:
-                    text = ' '.join(text_segments)
-                    processed_text = self.process_text(text)
-                    logger.info(f"Transcription successful: {processed_text}")
-                    
-                    # Check if we should unload the model
-                    self.check_model_timeout()
-                    
-                    return processed_text
-                else:
-                    logger.warning("No speech detected in audio")
-                    return None
-                    
-            finally:
-                # Ensure temporary file is always cleaned up
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-                    
-        except Exception as e:
-            logger.error(f"Error during transcription: {e}")
-            return None
-        finally:
-            self.icon_state = "🎤"  # Reset icon
-
     def on_press(self, key: keyboard.Key) -> None:
         """Handle keyboard press events."""
         try:
@@ -355,27 +291,44 @@ class AudioProcessor:
             logger.error(f"Error in key press handler: {e}")
 
     def on_release(self, key: keyboard.Key) -> None:
-        """Handle keyboard release events."""
+        """
+        Handle keyboard release events.
+        
+        Args:
+            key: The key that was released, can be None if key couldn't be determined
+        """
         try:
+            # Safety check for None key
+            if key is None:
+                logger.debug("Received None key in release handler")
+                return
+                
+            # Handle character keys
             if hasattr(key, 'char'):
-                self.keys_pressed.discard(key.char.lower())
+                if key.char is not None:  # Make sure we have a valid character
+                    self.keys_pressed.discard(key.char.lower())
+                else:
+                    logger.debug("Key has char attribute but char is None")
+            # Handle special keys (like shift, ctrl, etc.)
             else:
                 self.keys_pressed.discard(key)
+                
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
+            # Don't re-raise the exception - we want to keep running even if key handling fails
 
     def toggle_recording(self) -> None:
         """Toggle the recording state."""
-        if not self.is_recording:
+        if not self.is_recording and self.ready_to_record:
             logger.info("Starting new recording")
             Thread(target=self.start_recording).start()
-        else:
+        elif self.is_recording:
             logger.info("Stopping recording")
             self.stop_recording()
 
     def start_recording(self) -> None:
         """Start audio recording."""
-        if not self.is_recording:
+        if not self.is_recording and self.ready_to_record:  # Check both conditions
             logger.debug("Initializing recording")
             self.icon_state = "⏺️"  # Recording indicator
             self.frames = []
@@ -398,6 +351,23 @@ class AudioProcessor:
                 self.is_recording = False
                 self.icon_state = "🎤"
                 AudioNotifier.play_sound('error')
+
+    def callback(self, indata: np.ndarray, frames: int, time_info: dict, status: sd.CallbackFlags) -> None:
+        """
+        Callback function for audio recording.
+        
+        Args:
+            indata: Input audio data as numpy array
+            frames: Number of frames
+            time_info: Dictionary with timing information
+            status: Status flags indicating errors
+        """
+        if status:
+            logger.warning(f"Audio callback status: {status}")
+        
+        # Convert float32 to int16
+        audio_data = (indata * np.iinfo(np.int16).max).astype(np.int16)
+        self.frames.append(audio_data.copy())
 
     def stop_recording(self) -> None:
         """Stop recording and process the audio."""
@@ -436,6 +406,7 @@ class AudioProcessor:
                 AudioNotifier.play_sound('error')  # Play error sound if audio processing failed
             
             self.icon_state = "🎤"  # Reset icon
+            self.ready_to_record = True  # Set ready to record back to True after processing
 
     def save_audio(self, filename: str) -> Optional[np.ndarray]:
         """

@@ -6,6 +6,11 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Activate Python virtual environment
 source "$DIR/venv/bin/activate"
 
-# Run the audio transcriber
+# Run the launch manager with appropriate mode
 cd "$DIR"
-python audio_capture.py > "$DIR/transcriber.log" 2>&1 & 
+if [ "$1" = "--change-model" ]; then
+    echo "Starting model switcher..."
+    python launch_manager.py --change-model
+else
+    python launch_manager.py
+fi 
