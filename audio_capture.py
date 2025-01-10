@@ -1,4 +1,4 @@
-from typing import Optional, Set, List, Tuple
+from typing import Optional, Set, List
 import os
 import time
 import wave
@@ -8,8 +8,6 @@ import sys
 import logging
 import ssl
 import certifi
-import gc
-import noisereduce as nr
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -31,15 +29,14 @@ class AudioNotifier:
     """Handle system sound notifications."""
     
     SOUNDS = {
-        'start': '/System/Library/Sounds/Pop.aiff',      # Recording start
-        'stop': '/System/Library/Sounds/Bottle.aiff',    # Recording stop
-        'success': '/System/Library/Sounds/Glass.aiff',  # Transcription complete
-        'error': '/System/Library/Sounds/Basso.aiff'     # Error occurred
+        'start': '/System/Library/Sounds/Pop.aiff',
+        'stop': '/System/Library/Sounds/Bottle.aiff',
+        'success': '/System/Library/Sounds/Glass.aiff',
+        'error': '/System/Library/Sounds/Basso.aiff'
     }
     
     @staticmethod
     def play_sound(sound_type: str) -> None:
-        """Play a system sound."""
         try:
             if sound_type in AudioNotifier.SOUNDS:
                 sound_file = AudioNotifier.SOUNDS[sound_type]
@@ -245,21 +242,11 @@ class AudioProcessor:
             self.icon_state = "🎤"  # Reset icon
 
     def process_text(self, text: str) -> str:
-        """
-        Process transcribed text to improve formatting.
-        
-        Args:
-            text: Raw transcribed text
-            
-        Returns:
-            Formatted text with proper capitalization and punctuation
-        """
+        """Process transcribed text to improve formatting with proper capitalization and punctuation."""
         if not text:
             return text
             
-        # Split into sentences (Whisper sometimes misses proper sentence breaks)
         sentences = []
-        current_sentence = []
         
         # Split by existing periods but keep them
         parts = text.replace('. ', '.').split('.')
@@ -268,7 +255,6 @@ class AudioProcessor:
             if not part.strip():
                 continue
                 
-            # Clean up the part
             cleaned = part.strip()
             
             # Capitalize first letter
@@ -281,19 +267,16 @@ class AudioProcessor:
             
             sentences.append(cleaned)
         
-        # Join sentences with proper spacing
         return ' '.join(sentences)
 
     def on_press(self, key: keyboard.Key) -> None:
-        """Handle keyboard press events."""
         try:
-            # Track pressed keys
             if hasattr(key, 'char'):
                 self.keys_pressed.add(key.char.lower())
             else:
                 self.keys_pressed.add(key)
             
-            # Check for hotkey combination (Cmd+Shift+9)
+            # Check for Command+Shift+9
             if (keyboard.Key.cmd in self.keys_pressed and 
                 keyboard.Key.shift in self.keys_pressed and 
                 '9' in self.keys_pressed):
@@ -303,34 +286,23 @@ class AudioProcessor:
             logger.error(f"Error in key press handler: {e}")
 
     def on_release(self, key: keyboard.Key) -> None:
-        """
-        Handle keyboard release events.
-        
-        Args:
-            key: The key that was released, can be None if key couldn't be determined
-        """
         try:
-            # Safety check for None key
             if key is None:
                 logger.debug("Received None key in release handler")
                 return
                 
-            # Handle character keys
             if hasattr(key, 'char'):
-                if key.char is not None:  # Make sure we have a valid character
+                if key.char is not None:
                     self.keys_pressed.discard(key.char.lower())
                 else:
                     logger.debug("Key has char attribute but char is None")
-            # Handle special keys (like shift, ctrl, etc.)
             else:
                 self.keys_pressed.discard(key)
                 
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
-            # Don't re-raise the exception - we want to keep running even if key handling fails
 
     def toggle_recording(self) -> None:
-        """Toggle recording state."""
         if not self.is_recording and self.ready_to_record:
             logger.info("Starting new recording")
             Thread(target=self.start_recording).start()
@@ -339,15 +311,15 @@ class AudioProcessor:
             self.stop_recording()
 
     def start_recording(self) -> None:
-        """Start audio recording."""
-        if not self.is_recording and self.ready_to_record:  # Check both conditions
+        """Start audio recording with the configured settings."""
+        if not self.is_recording and self.ready_to_record:
             logger.debug("Initializing recording")
-            self.icon_state = "⏺️"  # Recording indicator
+            self.icon_state = "⏺️"
             self.frames = []
             self.is_recording = True
             
             try:
-                AudioNotifier.play_sound('start')  # Play start sound
+                AudioNotifier.play_sound('start')
                 with sd.InputStream(
                     callback=self.callback,
                     channels=self.channels,
@@ -366,49 +338,37 @@ class AudioProcessor:
                 AudioNotifier.play_sound('error')
 
     def callback(self, indata: np.ndarray, frames: int, time_info: dict, status: sd.CallbackFlags) -> None:
-        """
-        Callback function for audio recording.
-        
-        Args:
-            indata: Input audio data as numpy array
-            frames: Number of frames
-            time_info: Dictionary with timing information
-            status: Status flags indicating errors
-        """
+        """Handle incoming audio data during recording."""
         if status:
             logger.warning(f"Audio callback status: {status}")
         
-        # Convert float32 to int16
         audio_data = (indata * np.iinfo(np.int16).max).astype(np.int16)
         self.frames.append(audio_data.copy())
 
     def stop_recording(self) -> None:
-        """Stop recording and process the audio."""
+        """Stop recording and initiate audio processing."""
         logger.debug("Stopping recording")
         self.is_recording = False
-        AudioNotifier.play_sound('stop')  # Play stop sound
+        AudioNotifier.play_sound('stop')
         
         if self.frames:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             audio_filename = f"recording_{timestamp}.wav"
             
-            # Process audio
             audio_data = self.save_audio(audio_filename)
             
             if audio_data is not None:
                 try:
-                    # Transcribe and copy to clipboard
                     transcript = self.transcribe_audio(audio_data)
                     if transcript:
                         pyperclip.copy(transcript)
                         logger.info("Transcription copied to clipboard")
-                        self.icon_state = "✅"  # Success indicator
-                        AudioNotifier.play_sound('success')  # Play success sound
-                        time.sleep(1)  # Show success briefly
+                        self.icon_state = "✅"
+                        AudioNotifier.play_sound('success')
+                        time.sleep(1)
                     else:
-                        AudioNotifier.play_sound('error')  # Play error sound if no transcription
+                        AudioNotifier.play_sound('error')
                 finally:
-                    # Cleanup
                     try:
                         os.remove(audio_filename)
                         logger.debug("Temporary audio file deleted")
@@ -416,21 +376,13 @@ class AudioProcessor:
                         logger.error(f"Could not delete audio file: {e}")
                         AudioNotifier.play_sound('error')
             else:
-                AudioNotifier.play_sound('error')  # Play error sound if audio processing failed
+                AudioNotifier.play_sound('error')
                 
-            self.icon_state = "🎤"  # Reset icon
-            self.ready_to_record = True  # Set ready to record back to True after processing
+            self.icon_state = "🎤"
+            self.ready_to_record = True
 
     def save_audio(self, filename: str) -> Optional[np.ndarray]:
-        """
-        Save recorded audio to file.
-        
-        Args:
-            filename: The name of the file to save
-            
-        Returns:
-            The audio data if successful, None otherwise
-        """
+        """Save recorded audio to a WAV file and return the audio data."""
         if not self.frames:
             logger.warning("No audio frames to save")
             return None
@@ -450,7 +402,7 @@ class AudioProcessor:
             return None
 
     def cleanup(self):
-        """Clean up resources."""
+        """Clean up resources before shutdown."""
         logger.debug("Cleaning up resources")
         self.listener.stop()
 
