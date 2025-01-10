@@ -1,4 +1,4 @@
-from typing import Optional, Set, List
+from typing import Optional, Set, List, Tuple
 import os
 import time
 import wave
@@ -9,6 +9,7 @@ import logging
 import ssl
 import certifi
 import gc
+import noisereduce as nr
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -111,11 +112,13 @@ class AudioProcessor:
         logger.debug("Initializing AudioProcessor")
         self.app = app
         
-        # Audio settings
+        # Reverting to original working audio settings
         self.sample_rate: int = 16000
         self.channels: int = 1
         self.dtype = np.int16
         self.blocksize: int = 8192
+        
+        # Recording state
         self.is_recording: bool = False
         self.ready_to_record: bool = True
         self.frames: List[np.ndarray] = []
@@ -327,7 +330,7 @@ class AudioProcessor:
             # Don't re-raise the exception - we want to keep running even if key handling fails
 
     def toggle_recording(self) -> None:
-        """Toggle the recording state."""
+        """Toggle recording state."""
         if not self.is_recording and self.ready_to_record:
             logger.info("Starting new recording")
             Thread(target=self.start_recording).start()
@@ -355,6 +358,7 @@ class AudioProcessor:
                     logger.info("Recording started")
                     while self.is_recording:
                         time.sleep(0.1)
+                        
             except Exception as e:
                 logger.error(f"Error during recording: {e}")
                 self.is_recording = False
@@ -413,7 +417,7 @@ class AudioProcessor:
                         AudioNotifier.play_sound('error')
             else:
                 AudioNotifier.play_sound('error')  # Play error sound if audio processing failed
-            
+                
             self.icon_state = "🎤"  # Reset icon
             self.ready_to_record = True  # Set ready to record back to True after processing
 
@@ -444,7 +448,7 @@ class AudioProcessor:
         except Exception as e:
             logger.error(f"Error saving audio: {e}")
             return None
-    
+
     def cleanup(self):
         """Clean up resources."""
         logger.debug("Cleaning up resources")
