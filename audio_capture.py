@@ -271,8 +271,10 @@ class AudioProcessor:
 
     def on_press(self, key: keyboard.Key) -> None:
         try:
-            if hasattr(key, 'char'):
-                self.keys_pressed.add(key.char.lower())
+            # Handle special keys and character keys differently
+            if isinstance(key, keyboard.KeyCode):
+                if key.char is not None:
+                    self.keys_pressed.add(key.char.lower())
             else:
                 self.keys_pressed.add(key)
             
@@ -287,18 +289,12 @@ class AudioProcessor:
 
     def on_release(self, key: keyboard.Key) -> None:
         try:
-            if key is None:
-                logger.debug("Received None key in release handler")
-                return
-                
-            if hasattr(key, 'char'):
+            # Handle special keys and character keys differently
+            if isinstance(key, keyboard.KeyCode):
                 if key.char is not None:
                     self.keys_pressed.discard(key.char.lower())
-                else:
-                    logger.debug("Key has char attribute but char is None")
-            else:
+            elif key is not None:  # Handle special keys
                 self.keys_pressed.discard(key)
-                
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
 
