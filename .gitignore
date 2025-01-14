@@ -42,4 +42,17 @@ env/
 
 # Project specific
 temp_recording.wav
-recording_*.wav 
+recording_*.wav
+
+# Additional project-specific files
+*.pid
+test_*.wav
+test_*.py
+debug_output.log
+transcriber.pid
+launcher.error.log
+transcriber.error.log
+
+# Model files (should be downloaded by user)
+models/
+downloaded_models/ 
