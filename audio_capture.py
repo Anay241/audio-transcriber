@@ -110,7 +110,7 @@ class AudioProcessor:
         self.app = app
         
         # Reverting to original working audio settings
-        self.sample_rate: int = 16000
+        self.sample_rate: int = 44100
         self.channels: int = 1
         self.dtype = np.int16
         self.blocksize: int = 8192
