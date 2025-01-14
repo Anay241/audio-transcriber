@@ -95,7 +95,7 @@ class ModelManager:
         
         # System capabilities
         self.system_info = self.get_system_info()
-        logger.info(f"System capabilities detected: {self.system_info}")
+        # logger.info(f"System capabilities detected: {self.system_info}")
         
         # Performance monitoring
         self.performance_stats = {
@@ -116,17 +116,24 @@ class ModelManager:
         self.current_model = self._load_config().get('current_model', None)
         
         logger.debug(f"ModelManager initialized with current model: {self.current_model}")
-
+        
     def _setup_directories(self) -> None:
         """Create necessary directories if they don't exist."""
         try:
             self.app_support_dir.mkdir(parents=True, exist_ok=True)
+            # logger.info(f"Application directory setup at: {self.app_support_dir}")
+            
             self.config_dir.mkdir(exist_ok=True)
+            # logger.info(f"Config directory setup at: {self.config_dir}")
+            
+            # Ensure cache directory exists
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+            # logger.info(f"Cache directory setup at: {self.cache_dir}")
+            
         except Exception as e:
             logger.error(f"Failed to create directories: {e}")
             raise
-
+    
     def _load_config(self) -> dict:
         """Load configuration from file."""
         if self.config_file.exists():
@@ -137,7 +144,7 @@ class ModelManager:
             except Exception as e:
                 logger.error(f"Error loading config: {e}")
         return {}
-
+        
     def _save_config(self, config: dict) -> None:
         """Save configuration to file."""
         try:
@@ -146,11 +153,11 @@ class ModelManager:
                 json.dump(config, f)
         except Exception as e:
             logger.error(f"Error saving config: {e}")
-
+            
     def get_model_location(self, model_name: str) -> Path:
         """Get the path where the model is stored."""
         return self.cache_dir / f"models--Systran--faster-whisper-{model_name}"
-
+    
     def check_model_exists(self, model_name: str) -> bool:
         """Check if a model exists in the cache."""
         if model_name is None:
@@ -159,16 +166,125 @@ class ModelManager:
         if model_name not in self.AVAILABLE_MODELS:
             raise ValueError(f"Invalid model name: {model_name}")
             
+        # Check for model files in any snapshot directory
         model_dir = self.get_model_location(model_name)
         if not model_dir.exists():
             return False
             
+        # Look for model files in snapshot directories
         for snapshot_dir in (model_dir / "snapshots").glob("*"):
             if (snapshot_dir / "model.bin").exists():
                 return True
         
         return False
-
+    
+    def get_model_path(self) -> Path:
+        """Get the path where current model files are stored."""
+        if self.current_model is None:
+            raise ValueError("No model currently selected")
+            
+        model_dir = self.get_model_location(self.current_model)
+        # Find the first snapshot directory containing model.bin
+        for snapshot_dir in (model_dir / "snapshots").glob("*"):
+            if (snapshot_dir / "model.bin").exists():
+                return snapshot_dir
+        
+        raise FileNotFoundError(f"Model files not found for {self.current_model}")
+    
+    def download_model(self, model_name: str, progress_callback: Optional[Callable[[float], None]] = None) -> tuple[bool, str]:
+        """Download a model using faster-whisper."""
+        if model_name not in self.AVAILABLE_MODELS:
+            return False, f"Invalid model name: {model_name}"
+        
+        try:
+            logger.info(f"Starting download of model: {model_name}")
+            
+            # This will automatically download the model to cache
+            model = WhisperModel(model_name, download_root=str(self.cache_dir))
+            
+            # Give a longer delay for filesystem to update and verify
+            import time
+            attempts = 0
+            while attempts < 5:  # Try for up to 5 seconds
+                time.sleep(1)
+                if self.check_model_exists(model_name):
+                    logger.info(f"Model {model_name} successfully downloaded")
+                    return True, "Model downloaded successfully"
+                attempts += 1
+            
+            logger.error("Model download completed but model not found in expected location")
+            return False, "Model download failed: Model not found after download"
+                
+        except Exception as e:
+            logger.error(f"Error downloading model: {e}")
+            return False, f"Error downloading model: {e}"
+    
+    def get_model_size_on_disk(self, model_name: str) -> Optional[int]:
+        """Get the actual size of a downloaded model in bytes."""
+        try:
+            import glob
+            total_size = 0
+            model_path = self.get_model_location(model_name)
+            if model_path.exists():
+                for path in model_path.rglob('*'):
+                    if path.is_file():
+                        total_size += path.stat().st_size
+                return total_size
+        except Exception as e:
+            logger.error(f"Error calculating model size: {e}")
+        return None
+    
+    def get_available_models(self) -> dict:
+        """Get information about all available models."""
+        return self.AVAILABLE_MODELS
+    
+    def get_model_info(self, model_name: str) -> dict:
+        """Get information about a specific model."""
+        if model_name not in self.AVAILABLE_MODELS:
+            raise ValueError(f"Unknown model: {model_name}. Available models: {list(self.AVAILABLE_MODELS.keys())}")
+        return self.AVAILABLE_MODELS[model_name]
+    
+    def set_active_model(self, model_name: str) -> tuple[bool, str]:
+        """Set the active model to use for transcription."""
+        if model_name not in self.AVAILABLE_MODELS:
+            return False, f"Invalid model name: {model_name}"
+        
+        # Use check_model_location instead of check_model_exists
+        exists, _ = self.check_model_location(model_name)
+        if exists:
+            self.current_model = model_name
+            # Save the choice to config
+            config = self._load_config()
+            config['current_model'] = model_name
+            self._save_config(config)
+            
+            logger.info(f"Switched to model '{model_name}'")
+            return True, f"Successfully switched to model '{model_name}'"
+        else:
+            return False, f"Model '{model_name}' not found. Please download it first"
+    
+    def check_disk_space(self, model_name: str) -> tuple[bool, str]:
+        """
+        Check if there's enough disk space for the model.
+        Returns: (has_space: bool, message: str)
+        """
+        try:
+            model_size = self.AVAILABLE_MODELS[model_name]["size_mb"] * 1024 * 1024  # Convert MB to bytes
+            # Get free space in cache directory
+            free_space = psutil.disk_usage(self.cache_dir).free
+            
+            # Add 20% buffer for safety
+            required_space = model_size * 1.2
+            
+            if free_space >= required_space:
+                return True, f"Sufficient disk space available ({free_space // (1024*1024)} MB free)"
+            else:
+                return False, f"Insufficient disk space. Need {required_space // (1024*1024)} MB, but only {free_space // (1024*1024)} MB available"
+                
+        except Exception as e:
+            logger.error(f"Error checking disk space: {e}")
+            return False, f"Error checking disk space: {e}" 
+    
     def check_model_location(self, model_name: str) -> tuple[bool, Optional[Path]]:
         """
         Check if a model exists and return its location.
@@ -239,7 +355,7 @@ class ModelManager:
         try:
             # First try to detect Apple Silicon, which doesn't support float16
             if self.system_info.get("is_apple_silicon", False):
-                logger.info("Apple Silicon detected, using int8 compute type")
+                # logger.info("Apple Silicon detected, using int8 compute type")
                 return "int8"
 
             # For other systems, try float16 without loading a model
@@ -248,10 +364,10 @@ class ModelManager:
                 # Try to create a float16 array using numpy
                 import numpy as np
                 test_array = np.zeros(1, dtype=np.float16)
-                logger.info("float16 compute type is supported")
+                # logger.info("float16 compute type is supported")
                 return "float16"
             except Exception:
-                logger.info("float16 not supported, falling back to int8")
+                # logger.info("float16 not supported, falling back to int8")
                 return "int8"
                 
         except Exception as e:
@@ -303,7 +419,7 @@ class ModelManager:
                 # Always use int8 for better memory efficiency when memory is tight
                 settings["compute_type"] = "int8"
             
-            logger.info(f"Using settings for {model_name}: {settings}")
+            # logger.info(f"Using settings for {model_name}: {settings}")
             return settings
             
         except Exception as e:
@@ -343,10 +459,10 @@ class ModelManager:
                     self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
                     
                     # Log performance data
-                    logger.info(f"Performance stats for {operation}:")
-                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
-                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
-                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    # logger.info(f"Performance stats for {operation}:")
+                    # logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    # logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    # logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
                     
                     return result
                     
@@ -385,10 +501,10 @@ class ModelManager:
                     self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
                     
                     # Log performance data
-                    logger.info(f"Performance stats for {operation}:")
-                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
-                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
-                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    # logger.info(f"Performance stats for {operation}:")
+                    # logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    # logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    # logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
                     
                     return result
                     
@@ -409,7 +525,7 @@ class ModelManager:
                     
                 logger.info("Loading Whisper model from cache...")
                 settings = self.get_optimal_settings()
-                logger.info(f"Using settings for {self.current_model}: {settings}")
+                # logger.info(f"Using settings for {self.current_model}: {settings}")
                 
                 self.model = WhisperModel(
                     self.current_model,
