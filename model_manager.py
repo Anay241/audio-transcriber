@@ -95,7 +95,7 @@ class ModelManager:
         
         # System capabilities
         self.system_info = self.get_system_info()
-        # logger.info(f"System capabilities detected: {self.system_info}")
+        logger.info(f"System capabilities detected: {self.system_info}")
         
         # Performance monitoring
         self.performance_stats = {
@@ -121,14 +121,14 @@ class ModelManager:
         """Create necessary directories if they don't exist."""
         try:
             self.app_support_dir.mkdir(parents=True, exist_ok=True)
-            # logger.info(f"Application directory setup at: {self.app_support_dir}")
+            logger.info(f"Application directory setup at: {self.app_support_dir}")
             
             self.config_dir.mkdir(exist_ok=True)
-            # logger.info(f"Config directory setup at: {self.config_dir}")
+            logger.info(f"Config directory setup at: {self.config_dir}")
             
             # Ensure cache directory exists
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            # logger.info(f"Cache directory setup at: {self.cache_dir}")
+            logger.info(f"Cache directory setup at: {self.cache_dir}")
             
         except Exception as e:
             logger.error(f"Failed to create directories: {e}")
@@ -355,7 +355,7 @@ class ModelManager:
         try:
             # First try to detect Apple Silicon, which doesn't support float16
             if self.system_info.get("is_apple_silicon", False):
-                # logger.info("Apple Silicon detected, using int8 compute type")
+                logger.info("Apple Silicon detected, using int8 compute type")
                 return "int8"
 
             # For other systems, try float16 without loading a model
@@ -364,10 +364,10 @@ class ModelManager:
                 # Try to create a float16 array using numpy
                 import numpy as np
                 test_array = np.zeros(1, dtype=np.float16)
-                # logger.info("float16 compute type is supported")
+                logger.info("float16 compute type is supported")
                 return "float16"
             except Exception:
-                # logger.info("float16 not supported, falling back to int8")
+                logger.info("float16 not supported, falling back to int8")
                 return "int8"
                 
         except Exception as e:
@@ -419,7 +419,7 @@ class ModelManager:
                 # Always use int8 for better memory efficiency when memory is tight
                 settings["compute_type"] = "int8"
             
-            # logger.info(f"Using settings for {model_name}: {settings}")
+            logger.info(f"Using settings for {model_name}: {settings}")
             return settings
             
         except Exception as e:
@@ -459,10 +459,10 @@ class ModelManager:
                     self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
                     
                     # Log performance data
-                    # logger.info(f"Performance stats for {operation}:")
-                    # logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
-                    # logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
-                    # logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    logger.info(f"Performance stats for {operation}:")
+                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
                     
                     return result
                     
@@ -501,10 +501,10 @@ class ModelManager:
                     self.performance_stats["cpu_usage"].append(end_cpu - start_cpu)
                     
                     # Log performance data
-                    # logger.info(f"Performance stats for {operation}:")
-                    # logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
-                    # logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
-                    # logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
+                    logger.info(f"Performance stats for {operation}:")
+                    logger.info(f"  Time taken: {end_time - start_time:.2f} seconds")
+                    logger.info(f"  Memory change: {end_memory - start_memory:.1f} MB")
+                    logger.info(f"  CPU usage: {end_cpu - start_cpu:.1f}%")
                     
                     return result
                     
@@ -525,7 +525,7 @@ class ModelManager:
                     
                 logger.info("Loading Whisper model from cache...")
                 settings = self.get_optimal_settings()
-                # logger.info(f"Using settings for {self.current_model}: {settings}")
+                logger.info(f"Using settings for {self.current_model}: {settings}")
                 
                 self.model = WhisperModel(
                     self.current_model,
