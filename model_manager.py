@@ -543,20 +543,23 @@ class ModelManager:
 
     def check_timeout(self) -> None:
         """Check if model should be unloaded due to inactivity."""
-        if (self.model is not None and 
-            self.last_use_time is not None and 
-            time.time() - self.last_use_time > self.model_timeout):
-            logger.debug("Model timeout reached")
-            self.unload_model()
+        if hasattr(self, '_last_use_time') and hasattr(self, '_model'):
+            current_time = time.time()
+            # Reduce timeout from 300 to 180 seconds (5 to 3 minutes) to free memory sooner
+            if current_time - self._last_use_time > 180:
+                self.unload_model()
 
     def unload_model(self) -> None:
-        """Unload model from memory but keep files in cache."""
-        if self.model is not None:
-            logger.info("Unloading model from memory")
-            self.model = None
-            self.last_use_time = None
-            gc.collect()
-            logger.debug("Model unloaded successfully") 
+        """Unload the model and free up memory."""
+        try:
+            if hasattr(self, '_model'):
+                logger.info("Unloading model to free memory")
+                del self._model
+                gc.collect()  # Force garbage collection
+                if hasattr(self, '_last_use_time'):
+                    del self._last_use_time
+        except Exception as e:
+            logger.error(f"Error unloading model: {e}")
 
     def get_system_info(self) -> Dict:
         """
