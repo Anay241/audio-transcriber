@@ -10,7 +10,7 @@ source "$DIR/venv/bin/activate"
 cd "$DIR"
 if [ "$1" = "--change-model" ]; then
     echo "Starting model switcher..."
-    python launch_manager.py --change-model
+    python3 launch_manager.py --change-model
 else
-    python launch_manager.py
+    python3 launch_manager.py
 fi 
