@@ -10,6 +10,7 @@ A macOS menu bar application that provides real-time audio transcription using W
 - 🎯 Multiple Whisper models to choose from (varying accuracy and speed)
 - 💾 Smart memory management (auto-unloads model when inactive)
 - 🔔 Audio feedback for actions
+- 🔄 Visual state indicators (recording, processing, completed)
 
 ## System Requirements
 
@@ -22,8 +23,8 @@ A macOS menu bar application that provides real-time audio transcription using W
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/audio_transcriber.git
-   cd audio_transcriber
+   git clone https://github.com/Anay241/Audio_Transcriber.git
+   cd Audio_Transcriber
    ```
 
 2. Create and activate a virtual environment:
@@ -39,14 +40,15 @@ A macOS menu bar application that provides real-time audio transcription using W
 
 4. Make the launch script executable:
    ```bash
-   chmod +x launch_transcriber.sh
+   chmod +x setup/launch_transcriber.sh
+   chmod +x bin/main.py
    ```
 
 ## First-Time Setup
 
 1. Run the application:
    ```bash
-   ./launch_transcriber.sh
+   ./setup/launch_transcriber.sh
    ```
 
 2. On first run, you'll be prompted to choose a transcription model:
@@ -57,6 +59,29 @@ A macOS menu bar application that provides real-time audio transcription using W
    - **large** (6GB): Slow, best accuracy
 
    Choose based on your needs and available system resources.
+
+## Project Structure
+
+```
+Audio_Transcriber/
+├── app/                    # Main application code
+│   ├── common/             # Common utilities
+│   ├── core/               # Core functionality
+│   │   └── audio_processor.py  # Audio processing and transcription
+│   ├── models/             # Model management
+│   └── ui/                 # User interface
+│       └── menu_bar.py     # Menu bar implementation
+├── bin/                    # Executable scripts
+│   └── main.py             # Main entry point
+├── logs/                   # Log files directory
+├── setup/                  # Setup and launch scripts
+│   ├── launch_manager.py   # Application launcher
+│   ├── launch_transcriber.sh  # Launch script
+│   └── setup_manager.py    # First-time setup
+└── utils/                  # Utility functions
+    ├── file_utils.py       # File handling utilities
+    └── logger.py           # Logging configuration
+```
 
 ## Usage
 
@@ -69,10 +94,10 @@ A macOS menu bar application that provides real-time audio transcription using W
    - The transcribed text will be automatically copied to your clipboard
 
 3. Visual Indicators:
-   - 🎤 Ready to record
-   - ⏺️ Recording in progress
-   - 💭 Transcribing
-   - ✅ Transcription complete
+   - 🎤 Ready to record (idle state)
+   - ⏺️ Recording in progress (recording state)
+   - 💭 Transcribing (processing state)
+   - ✅ Transcription complete (completed state - automatically returns to idle)
 
 4. Audio Feedback:
    - Pop sound: Recording started
@@ -84,7 +109,7 @@ A macOS menu bar application that provides real-time audio transcription using W
 
 To switch to a different model:
 ```bash
-./launch_transcriber.sh --change-model
+./setup/launch_transcriber.sh --change-model
 ```
 
 This will:
@@ -109,7 +134,7 @@ For advanced users:
 
 1. **No menu bar icon?**
    - Make sure you're running from the correct directory
-   - Check the logs in `transcriber.log`
+   - Check the logs in `logs/transcriber.log`
 
 2. **Model download fails?**
    - Check your internet connection
@@ -123,14 +148,15 @@ For advanced users:
 
 ## Logs
 
-Logs are stored in:
+Logs are stored in the `logs` directory:
 - `transcriber.log`: Main application logs
 - `launcher.log`: Launch script logs
 - `launcher.error.log`: Launch error logs
+- `pid.txt`: Process ID file for the running application
 
 ## License
 
-[Your License Here]
+MIT License
 
 ## Contributing
 
