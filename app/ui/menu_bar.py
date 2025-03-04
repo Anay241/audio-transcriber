@@ -3,6 +3,13 @@
 import logging
 import rumps
 import time
+import atexit
+import signal
+import sys
+import gc
+import multiprocessing
+import multiprocessing.resource_tracker
+import os
 from app.core.audio_processor import AudioProcessor
 from app.common.notifier import AudioNotifier
 
@@ -43,9 +50,35 @@ class AudioTranscriberApp(rumps.App):
         # Set up periodic icon refresh
         rumps.Timer(self.refresh_icon, 0.5).start()  # Refresh icon every half second
         
+        # Register cleanup for exit
+        atexit.register(self.stop)
+        
+        # Set up signal handlers for graceful shutdown
+        self._setup_signal_handlers()
+        
         logger.info("Audio Transcriber running in background")
         logger.info("Use Command+Shift+9 from any application to start/stop recording")
     
+    def _setup_signal_handlers(self):
+        """Set up signal handlers for graceful shutdown."""
+        logger.info("Setting up signal handlers")
+        
+        def handle_signal(sig, frame):
+            """Handle termination signals by cleaning up and exiting."""
+            signal_name = signal.Signals(sig).name
+            logger.info(f"Received {signal_name} signal, shutting down gracefully")
+            
+            # Clean up resources
+            self.stop()
+            
+            # Force exit after cleanup
+            logger.info("Exiting application")
+            sys.exit(0)
+        
+        # Register signal handlers
+        signal.signal(signal.SIGINT, handle_signal)  # Ctrl+C
+        signal.signal(signal.SIGTERM, handle_signal)  # Termination request
+
     def set_state(self, state):
         """Set the application state and update the icon."""
         if state in APP_STATES:
@@ -94,20 +127,33 @@ class AudioTranscriberApp(rumps.App):
     def quit_app(self, _):
         """Quit the application."""
         logger.info("Quitting application")
-        try:
-            self.stop()
-            rumps.quit_application()
-        except Exception as e:
-            logger.error(f"Error quitting application: {e}")
-            rumps.quit_application()
+        
+        # Stop all processes
+        self.stop()
+        
+        # Force garbage collection
+        logger.info("Forcing garbage collection")
+        gc.collect()
+        
+        # Give cleanup processes time to complete
+        time.sleep(0.5)
+        
+        logger.info("Application shutdown complete")
+        rumps.quit_application()
 
     def stop(self):
-        """Stop all processes before quitting."""
-        try:
-            if hasattr(self, 'processor'):
-                self.processor.cleanup()
-        except Exception as e:
-            logger.error(f"Error stopping processes: {e}")
+        """Stop all processes and clean up resources."""
+        logger.info("Stopping all processes")
+        
+        # Clean up audio processor
+        if hasattr(self, 'processor'):
+            logger.info("Cleaning up audio processor")
+            self.processor.cleanup()
+        
+        # Force garbage collection
+        gc.collect()
+        
+        logger.info("All processes stopped")
 
     def toggle_recording(self, _):
         """Toggle recording state."""

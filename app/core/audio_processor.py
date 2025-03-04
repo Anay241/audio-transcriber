@@ -13,6 +13,12 @@ from faster_whisper import WhisperModel
 import pyperclip
 from pynput import keyboard
 import rumps
+import atexit
+import gc
+import multiprocessing
+import multiprocessing.resource_tracker
+import signal
+import sys
 
 from app.models.model_manager import ModelManager
 from app.core.text_processor import process_text
@@ -43,6 +49,9 @@ class AudioProcessor:
         # Model management
         self.model_manager = ModelManager()
         
+        # Thread tracking
+        self.transcription_thread = None
+        
         # Setup keyboard listener
         self.keys_pressed: Set = set()
         self.listener = keyboard.Listener(
@@ -50,6 +59,10 @@ class AudioProcessor:
             on_release=self.on_release)
         self.listener.start()
         logger.debug("Keyboard listener started")
+        
+        # Register cleanup function to be called at exit
+        atexit.register(self.cleanup)
+        logger.debug("Registered cleanup function with atexit")
 
     def ensure_model_loaded(self) -> WhisperModel:
         """Get a loaded model for transcription."""
@@ -247,8 +260,11 @@ class AudioProcessor:
                         AudioNotifier.play_sound('error')
                         self.app.set_state('idle')
                 
-                # Start the transcription thread
-                Thread(target=transcribe_thread).start()
+                # Start the transcription thread and track it
+                self.transcription_thread = Thread(target=transcribe_thread)
+                self.transcription_thread.daemon = True  # Make it a daemon thread
+                self.transcription_thread.start()
+                logger.debug("Transcription thread started")
             else:
                 logger.warning("No audio frames captured")
                 self.app.set_state('idle')
@@ -282,10 +298,33 @@ class AudioProcessor:
             return None
 
     def cleanup(self):
-        """Clean up resources."""
-        logger.debug("Cleaning up AudioProcessor resources")
-        if hasattr(self, 'listener') and self.listener.is_alive():
+        """Clean up resources when the application exits."""
+        logger.info("Cleaning up AudioProcessor resources")
+        
+        # Stop keyboard listener if active
+        if hasattr(self, 'listener') and self.listener:
+            logger.info("Stopping keyboard listener")
             self.listener.stop()
-        if self.is_recording and hasattr(self, 'stream'):
+        
+        # Stop audio stream if active
+        if hasattr(self, 'stream') and self.stream and self.stream.active:
+            logger.info("Stopping audio stream")
             self.stream.stop()
-            self.stream.close() 
+            self.stream.close()
+        
+        # Stop transcription thread if active
+        if hasattr(self, 'transcription_thread') and self.transcription_thread and self.transcription_thread.is_alive():
+            logger.info("Waiting for transcription thread to complete")
+            # Give the thread a chance to complete naturally
+            self.transcription_thread.join(timeout=2.0)
+        
+        # Unload model if loaded
+        if hasattr(self, 'model_manager') and self.model_manager:
+            logger.info("Unloading Whisper model")
+            self.model_manager.unload_model()
+        
+        # Force garbage collection
+        logger.info("Forcing garbage collection")
+        gc.collect()
+        
+        logger.info("AudioProcessor cleanup completed") 
