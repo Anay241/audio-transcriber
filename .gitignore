@@ -28,6 +28,9 @@ env/
 # Logs
 *.log
 *.log.*
+logs/
+logs/*.log
+logs/*.pid
 
 # macOS
 .DS_Store

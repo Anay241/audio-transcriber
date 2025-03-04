@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, Tuple
-from model_manager import ModelManager
+from app.models.model_manager import ModelManager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -48,54 +48,51 @@ class SetupManager:
 
     def handle_model_download(self, model_name: str) -> Tuple[bool, str]:
         """Handle the model download process with progress indication."""
-        print(f"\nPreparing to download model: {model_name}")
+        print(f"\nDownloading {model_name} model...")
+        print("This may take a while depending on your internet connection.")
+        print("Progress: ", end="", flush=True)
         
-        # Check disk space first
-        has_space, space_msg = self.model_manager.check_disk_space(model_name)
-        if not has_space:
-            print(f"Error: {space_msg}")
-            return False, space_msg
-
-        print("Starting download (this may take a while depending on your internet connection)...")
-        success, message = self.model_manager.download_model(model_name)
+        def progress_callback(progress):
+            """Display download progress."""
+            progress_percent = int(progress * 100)
+            if progress_percent % 10 == 0:
+                print(".", end="", flush=True)
         
-        if success:
-            print(f"\nSuccess: {message}")
-        else:
-            print(f"\nError: {message}")
-        
+        success, message = self.model_manager.download_model(model_name, progress_callback)
+        print(f"\n{message}")
         return success, message
 
     def run_setup(self) -> bool:
-        """Run the complete setup process."""
-        print("\nWelcome to AudioTranscriber Setup!")
-        print("Let's choose a model for transcription.")
+        """Run the setup process to configure the application."""
+        print("\n=== Audio Transcriber Setup ===")
+        print("This setup will help you choose and download a transcription model.")
         
-        while True:
-            self.display_model_options()
-            model_choice = self.get_user_model_choice()
-            
-            if model_choice is None:
-                print("\nSetup cancelled.")
-                return False
-            
-            # Confirm choice
-            model_info = self.model_manager.get_model_info(model_choice)
-            print(f"\nYou selected: {model_choice}")
-            print(f"Description: {model_info['description']}")
-            confirm = input("Proceed with this model? (y/n): ").lower()
-            
-            if confirm == 'y':
-                success, message = self.handle_model_download(model_choice)
-                if success:
-                    # Set as active model
-                    self.model_manager.set_active_model(model_choice)
-                    print("\nSetup completed successfully!")
-                    return True
-                else:
-                    retry = input("\nWould you like to try a different model? (y/n): ").lower()
-                    if retry != 'y':
-                        print("\nSetup cancelled.")
-                        return False
-            else:
-                print("\nOkay, let's choose again.") 
+        # Display available models
+        self.display_model_options()
+        
+        # Get user's model choice
+        model_name = self.get_user_model_choice()
+        if not model_name:
+            logger.info("Setup cancelled by user")
+            return False
+        
+        # Check if model already exists
+        if self.model_manager.check_model_exists(model_name):
+            print(f"\nModel {model_name} is already downloaded.")
+            self.model_manager.set_active_model(model_name)
+            return True
+        
+        # Check disk space
+        has_space, message = self.model_manager.check_disk_space(model_name)
+        if not has_space:
+            print(f"\nError: {message}")
+            return False
+        
+        # Download the model
+        success, _ = self.handle_model_download(model_name)
+        if success:
+            print("\nSetup completed successfully!")
+            return True
+        else:
+            print("\nSetup failed. Please try again later.")
+            return False 
