@@ -46,18 +46,26 @@ A macOS menu bar application that provides real-time audio transcription using W
 
 ## First-Time Setup
 
-1. Run the application:
+1. Run the application (multiple methods available):
    ```bash
+   # Method 1: Using the launch script
    ./setup/launch_transcriber.sh
+   
+   # Method 2: Direct Python execution  
+   python bin/main.py
+   
+   # Method 3: Using the module system
+   python -m setup.launch_manager
    ```
 
-2. On first run, you'll be prompted to choose a transcription model:
-   - **tiny** (150MB): Fastest, basic accuracy
-   - **base** (400MB): Very fast, good accuracy
-   - **small** (900MB): Fast, better accuracy
-   - **medium** (3GB): Moderate speed, very good accuracy
-   - **large** (6GB): Slow, best accuracy
+2. On first run, you'll be prompted to choose a faster-whisper transcription model:
+   - **tiny** (39MB): Very fast, basic accuracy - good for quick testing
+   - **base** (74MB): Fast, good accuracy - **recommended for most users**
+   - **small** (244MB): Medium speed, better accuracy
+   - **medium** (769MB): Slow, very good accuracy
+   - **large-v3** (1.5GB): Very slow, excellent accuracy - latest model
 
+   The application will automatically download and set up your chosen model.
    Choose based on your needs and available system resources.
 
 ## Project Structure
