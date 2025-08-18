@@ -57,6 +57,15 @@ launcher.error.log
 transcriber.error.log
 cursorrules
 
-# Model files (should be downloaded by user)
-models/
-downloaded_models/ 
+# Downloaded model files (should be downloaded by user)
+# Note: This ignores model data files but NOT the app/models/ source code directory
+downloaded_models/
+*.model
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# User model storage directories (not the source code)
+~/.audio_transcriber/models/
+temp_models/ 
